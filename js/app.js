@@ -1,10 +1,11 @@
 var _ = require('lodash');
 var three = require('three');
 var OrbitControls = require('three-orbit-controls')(three)
+var Stats = require('./vendor/stats.min.js');
 
 var Planet = require('./planet.js');
 var planeFactory = require('./plane.js');
-
+var physics = require('./physics.js');
 
 var scene = new three.Scene();
 
@@ -13,6 +14,13 @@ camera.position.y = 1000;
 camera.lookAt(new three.Vector3(0,0,0));
 
 var renderer = new three.WebGLRenderer();
+
+var stats = new Stats();
+stats.setMode(0);
+stats.domElement.style.position = 'absolute';
+stats.domElement.style.top = '0px';
+stats.domElement.style.left = '0px';
+document.body.appendChild(stats.domElement);
 
 //renderer.setClearColor(0xAAAAAA, 1);
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -27,13 +35,11 @@ var bodies = [];
 // gradient map of gravitation
 
 
-var sun = new Planet({size: 50, color: 0xffffff}, scene);
+var sun = new Planet({size: 50, mass: 3000, color: 0xffffff}, scene);
 bodies.push(sun);
 
-var earth = new Planet({size: 10, color: 0xffffff, velocity: new three.Vector3(0, 0, 2)}, scene);
+var earth = new Planet({size: 10, color: 0xffffff, velocity: new three.Vector3(0, 0, 2), position: new three.Vector3(300, 0, 0)}, scene);
 bodies.push(earth);
-
-earth.mesh.position.x = 300;
 
 var plane = planeFactory();
 scene.add(plane);
@@ -47,12 +53,7 @@ scene.add(ambientLight);
 
 function update () {
     _.each(bodies, function (body) {
-        var forceVector = calculateAllForces(body);
-        var acceleration = forceVector.divideScalar(body.mass);
-
-        body.velocity = body.velocity.add(acceleration);
-        body.forces = forceVector;
-
+        body.force = calculateAllForces(body);;
         body.update();
     });
 }
@@ -63,27 +64,19 @@ function calculateAllForces (subject) {
     _.each(bodies, function (object) {
         if (subject.id === object.id) return;
 
-        forceVector.add(calculateForce(subject, object));
+        forceVector.add(physics.calculateForce(subject, object));
     });
 
-    console.log(subject.id + ': ' + forceVector.length());
-
     return forceVector;
-}
-
-function calculateForce (subject, object) {
-    var forceVector = new three.Vector3().subVectors(subject.mesh.position, object.mesh.position);
-    var length = forceVector.length();
-    var directionVector = new three.Vector3().copy(forceVector).divideScalar(forceVector.length());
-
-    return directionVector.multiplyScalar(0.005 * subject.mass * object.mass / length * length);
 }
 
 var controls = new OrbitControls(camera);
 
 function render () {
+    stats.begin();
     update();
-    requestAnimationFrame(render);
     renderer.render(scene, camera);
+    stats.end();
+    requestAnimationFrame(render);
 }
 render();

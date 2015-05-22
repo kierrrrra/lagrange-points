@@ -2,6 +2,40 @@
 (function (process,global,Buffer,__argument0,__argument1,__argument2,__argument3,__filename,__dirname){
 'use strict';
 
+var three = require('three');
+
+var G = 1;
+
+var Physics = function () {};
+
+Physics.getAcceleration = function (body) {
+    return new three.Vector3().copy(body.force).divideScalar(body.mass);
+}
+
+Physics.getVelocity = function (body) {
+    return new three.Vector3().copy(body.velocity).add(body.acceleration);
+}
+
+Physics.getPositionDelta = function (body) {
+    return new three.Vector3().addVectors(body.velocity, new three.Vector3().copy(body.acceleration).divideScalar(2));
+}
+
+Physics.calculateForce = function (subject, object) {
+    var deltaVector = new three.Vector3().subVectors(subject.mesh.position, object.mesh.position);
+    var distance = deltaVector.length();
+    var directionVector = new three.Vector3().copy(deltaVector).divideScalar(deltaVector.length());
+
+    return directionVector.multiplyScalar(G * subject.mass * object.mass / (distance * distance));
+}
+
+module.exports = Physics;
+
+}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer,arguments[3],arguments[4],arguments[5],arguments[6],"/js/physics.js","/js")
+
+},{"_process":13,"buffer":9,"three":16}],2:[function(require,module,exports){
+(function (process,global,Buffer,__argument0,__argument1,__argument2,__argument3,__filename,__dirname){
+'use strict';
+
 var _ = require('lodash');
 var three = require('three');
 
@@ -21,13 +55,15 @@ module.exports = planeFactory;
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer,arguments[3],arguments[4],arguments[5],arguments[6],"/js/plane.js","/js")
 
-},{"_process":11,"buffer":7,"lodash":12,"three":14}],2:[function(require,module,exports){
+},{"_process":13,"buffer":9,"lodash":14,"three":16}],3:[function(require,module,exports){
 (function (process,global,Buffer,__argument0,__argument1,__argument2,__argument3,__filename,__dirname){
 'use strict';
 
 var _ = require('lodash');
 var three = require('three');
 var Class = require('backbone-class');
+
+var physics = require('./physics');
 
 var Planet = Class.extend({
 
@@ -38,12 +74,15 @@ var Planet = Class.extend({
     },
 
     initialize: function (options, scene) {
+        if (!scene) console.error('You must pass scene to a planet');
+
         this.id = IdGenerator.getNew();
 
         this.options = _.defaults({}, options, this.defaults);
 
         this.mass = this.options.mass || this.options.size;
         this.velocity = this.options.velocity;
+        this.acceleration = new three.Vector3(0,0,0);
 
         var geometry = new three.SphereGeometry(this.options.size || 10, 32, 32);
         var material = new three.MeshPhongMaterial({color: this.options.color});
@@ -53,6 +92,12 @@ var Planet = Class.extend({
         }
 
         this.mesh = new three.Mesh(geometry, material);
+
+        if (this.options.position) {
+            this.mesh.position.x = this.options.position.x;
+            this.mesh.position.y = this.options.position.y;
+            this.mesh.position.z = this.options.position.z;
+        }
 
         this.setUpVectorLines();
 
@@ -80,11 +125,13 @@ var Planet = Class.extend({
         scene.add(this.mesh);
         scene.add(this.velocityLine);
         scene.add(this.forceLine);
+        scene.add(this.traceLine);
     },
 
     setUpVectorLines: function () {
         this.setUpVelocityLine();
         this.setUpForceLine();
+        this.setUpTraceLine();
     },
 
     setUpVelocityLine: function () {
@@ -109,17 +156,44 @@ var Planet = Class.extend({
         this.forceLine = new three.Line(lineGeometry, lineMaterial);
     },
 
+    setUpTraceLine: function () {
+        var lineMaterial = new three.LineBasicMaterial({color: 0xAAAAAA});
+        var lineGeometry = new three.Geometry();
+
+        _.each(new Array(100), function () {
+            lineGeometry.vertices.push(
+                new three.Vector3().copy(this.mesh.position)
+            );
+        }, this);
+
+        this.traceLine = new three.Line(lineGeometry, lineMaterial);
+    },
+
+    updateTraceLine: function () {
+        for (var i = this.traceLine.geometry.vertices.length; i > 0; i--) {
+            this.traceLine.geometry.vertices[i] = this.traceLine.geometry.vertices[i-1];
+        }
+
+        this.traceLine.geometry.vertices[0] = this.mesh.position.clone();
+
+        this.traceLine.geometry.verticesNeedUpdate = true;
+    },
+
     update: function () {
-        this.mesh.position.sub(this.velocity);
+        this.acceleration = physics.getAcceleration(this);
+        this.mesh.position.sub(physics.getPositionDelta(this));
+        this.velocity = physics.getVelocity(this);
 
         this.velocityLine.geometry.vertices[0] = this.mesh.position;
         this.velocityLine.geometry.vertices[1] = this.mesh.position.clone().add(this.velocity.clone().multiplyScalar(-10));
 
         this.forceLine.geometry.vertices[0] = this.mesh.position;
-        this.forceLine.geometry.vertices[1] = this.mesh.position.clone().add(this.forces.clone().multiplyScalar(-100));
+        this.forceLine.geometry.vertices[1] = this.mesh.position.clone().add(this.force.clone().multiplyScalar(-100));
 
         this.velocityLine.geometry.verticesNeedUpdate = true;
         this.forceLine.geometry.verticesNeedUpdate = true;
+
+        this.updateTraceLine();
     }
 });
 
@@ -138,9 +212,20 @@ module.exports = Planet;
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer,arguments[3],arguments[4],arguments[5],arguments[6],"/js/planet.js","/js")
 
-},{"_process":11,"backbone-class":3,"buffer":7,"lodash":12,"three":14}],3:[function(require,module,exports){
+},{"./physics":1,"_process":13,"backbone-class":5,"buffer":9,"lodash":14,"three":16}],4:[function(require,module,exports){
+(function (process,global,Buffer,__argument0,__argument1,__argument2,__argument3,__filename,__dirname){
+// stats.js - http://github.com/mrdoob/stats.js
+var Stats=function(){var l=Date.now(),m=l,g=0,n=Infinity,o=0,h=0,p=Infinity,q=0,r=0,s=0,f=document.createElement("div");f.id="stats";f.addEventListener("mousedown",function(b){b.preventDefault();t(++s%2)},!1);f.style.cssText="width:80px;opacity:0.9;cursor:pointer";var a=document.createElement("div");a.id="fps";a.style.cssText="padding:0 0 3px 3px;text-align:left;background-color:#002";f.appendChild(a);var i=document.createElement("div");i.id="fpsText";i.style.cssText="color:#0ff;font-family:Helvetica,Arial,sans-serif;font-size:9px;font-weight:bold;line-height:15px";
+i.innerHTML="FPS";a.appendChild(i);var c=document.createElement("div");c.id="fpsGraph";c.style.cssText="position:relative;width:74px;height:30px;background-color:#0ff";for(a.appendChild(c);74>c.children.length;){var j=document.createElement("span");j.style.cssText="width:1px;height:30px;float:left;background-color:#113";c.appendChild(j)}var d=document.createElement("div");d.id="ms";d.style.cssText="padding:0 0 3px 3px;text-align:left;background-color:#020;display:none";f.appendChild(d);var k=document.createElement("div");
+k.id="msText";k.style.cssText="color:#0f0;font-family:Helvetica,Arial,sans-serif;font-size:9px;font-weight:bold;line-height:15px";k.innerHTML="MS";d.appendChild(k);var e=document.createElement("div");e.id="msGraph";e.style.cssText="position:relative;width:74px;height:30px;background-color:#0f0";for(d.appendChild(e);74>e.children.length;)j=document.createElement("span"),j.style.cssText="width:1px;height:30px;float:left;background-color:#131",e.appendChild(j);var t=function(b){s=b;switch(s){case 0:a.style.display=
+"block";d.style.display="none";break;case 1:a.style.display="none",d.style.display="block"}};return{REVISION:12,domElement:f,setMode:t,begin:function(){l=Date.now()},end:function(){var b=Date.now();g=b-l;n=Math.min(n,g);o=Math.max(o,g);k.textContent=g+" MS ("+n+"-"+o+")";var a=Math.min(30,30-30*(g/200));e.appendChild(e.firstChild).style.height=a+"px";r++;b>m+1E3&&(h=Math.round(1E3*r/(b-m)),p=Math.min(p,h),q=Math.max(q,h),i.textContent=h+" FPS ("+p+"-"+q+")",a=Math.min(30,30-30*(h/100)),c.appendChild(c.firstChild).style.height=
+a+"px",m=b,r=0);return b},update:function(){l=this.end()}}};"object"===typeof module&&(module.exports=Stats);
+
+}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer,arguments[3],arguments[4],arguments[5],arguments[6],"/js/vendor/stats.min.js","/js/vendor")
+
+},{"_process":13,"buffer":9}],5:[function(require,module,exports){
 module.exports = require('./lib/backbone-class')
-},{"./lib/backbone-class":4}],4:[function(require,module,exports){
+},{"./lib/backbone-class":6}],6:[function(require,module,exports){
 var Backbone = require('backbone');
 var _        = require('underscore');
 
@@ -238,7 +323,7 @@ Klass.extend = extend;
 
 module.exports = Klass
 
-},{"backbone":5,"underscore":6}],5:[function(require,module,exports){
+},{"backbone":7,"underscore":8}],7:[function(require,module,exports){
 //     Backbone.js 1.1.2
 
 //     (c) 2010-2014 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
@@ -1848,7 +1933,7 @@ module.exports = Klass
 
 }));
 
-},{"underscore":6}],6:[function(require,module,exports){
+},{"underscore":8}],8:[function(require,module,exports){
 (function (process,global,Buffer,__argument0,__argument1,__argument2,__argument3,__filename,__dirname){
 //     Underscore.js 1.5.2
 //     http://underscorejs.org
@@ -3129,7 +3214,7 @@ module.exports = Klass
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer,arguments[3],arguments[4],arguments[5],arguments[6],"/node_modules/backbone-class/node_modules/underscore/underscore.js","/node_modules/backbone-class/node_modules/underscore")
 
-},{"_process":11,"buffer":7}],7:[function(require,module,exports){
+},{"_process":13,"buffer":9}],9:[function(require,module,exports){
 (function (process,global,Buffer,__argument0,__argument1,__argument2,__argument3,__filename,__dirname){
 /*!
  * The buffer module from node.js, for the browser.
@@ -4548,7 +4633,7 @@ function decodeUtf8Char (str) {
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer,arguments[3],arguments[4],arguments[5],arguments[6],"/node_modules/browserify/node_modules/buffer/index.js","/node_modules/browserify/node_modules/buffer")
 
-},{"_process":11,"base64-js":8,"buffer":7,"ieee754":9,"is-array":10}],8:[function(require,module,exports){
+},{"_process":13,"base64-js":10,"buffer":9,"ieee754":11,"is-array":12}],10:[function(require,module,exports){
 (function (process,global,Buffer,__argument0,__argument1,__argument2,__argument3,__filename,__dirname){
 var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
@@ -4677,7 +4762,7 @@ var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer,arguments[3],arguments[4],arguments[5],arguments[6],"/node_modules/browserify/node_modules/buffer/node_modules/base64-js/lib/b64.js","/node_modules/browserify/node_modules/buffer/node_modules/base64-js/lib")
 
-},{"_process":11,"buffer":7}],9:[function(require,module,exports){
+},{"_process":13,"buffer":9}],11:[function(require,module,exports){
 (function (process,global,Buffer,__argument0,__argument1,__argument2,__argument3,__filename,__dirname){
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m,
@@ -4766,7 +4851,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer,arguments[3],arguments[4],arguments[5],arguments[6],"/node_modules/browserify/node_modules/buffer/node_modules/ieee754/index.js","/node_modules/browserify/node_modules/buffer/node_modules/ieee754")
 
-},{"_process":11,"buffer":7}],10:[function(require,module,exports){
+},{"_process":13,"buffer":9}],12:[function(require,module,exports){
 (function (process,global,Buffer,__argument0,__argument1,__argument2,__argument3,__filename,__dirname){
 
 /**
@@ -4804,7 +4889,7 @@ module.exports = isArray || function (val) {
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer,arguments[3],arguments[4],arguments[5],arguments[6],"/node_modules/browserify/node_modules/buffer/node_modules/is-array/index.js","/node_modules/browserify/node_modules/buffer/node_modules/is-array")
 
-},{"_process":11,"buffer":7}],11:[function(require,module,exports){
+},{"_process":13,"buffer":9}],13:[function(require,module,exports){
 (function (process,global,Buffer,__argument0,__argument1,__argument2,__argument3,__filename,__dirname){
 // shim for using process in browser
 
@@ -4899,7 +4984,7 @@ process.umask = function() { return 0; };
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer,arguments[3],arguments[4],arguments[5],arguments[6],"/node_modules/browserify/node_modules/process/browser.js","/node_modules/browserify/node_modules/process")
 
-},{"_process":11,"buffer":7}],12:[function(require,module,exports){
+},{"_process":13,"buffer":9}],14:[function(require,module,exports){
 /**
  * @license
  * lodash 3.8.0 (Custom Build) <https://lodash.com/>
@@ -17103,7 +17188,7 @@ process.umask = function() { return 0; };
   }
 }.call(this));
 
-},{}],13:[function(require,module,exports){
+},{}],15:[function(require,module,exports){
 (function (process,global,Buffer,__argument0,__argument1,__argument2,__argument3,__filename,__dirname){
 module.exports = function(THREE) {
     var MOUSE = THREE.MOUSE
@@ -17788,7 +17873,7 @@ module.exports = function(THREE) {
 }
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer,arguments[3],arguments[4],arguments[5],arguments[6],"/node_modules/three-orbit-controls/index.js","/node_modules/three-orbit-controls")
 
-},{"_process":11,"buffer":7}],14:[function(require,module,exports){
+},{"_process":13,"buffer":9}],16:[function(require,module,exports){
 var self = self || {};// File:src/Three.js
 
 /**
@@ -52936,15 +53021,16 @@ if (typeof exports !== 'undefined') {
   this['THREE'] = THREE;
 }
 
-},{}],15:[function(require,module,exports){
+},{}],17:[function(require,module,exports){
 (function (process,global,Buffer,__argument0,__argument1,__argument2,__argument3,__filename,__dirname){
 var _ = require('lodash');
 var three = require('three');
 var OrbitControls = require('three-orbit-controls')(three)
+var Stats = require('./vendor/stats.min.js');
 
 var Planet = require('./planet.js');
 var planeFactory = require('./plane.js');
-
+var physics = require('./physics.js');
 
 var scene = new three.Scene();
 
@@ -52953,6 +53039,13 @@ camera.position.y = 1000;
 camera.lookAt(new three.Vector3(0,0,0));
 
 var renderer = new three.WebGLRenderer();
+
+var stats = new Stats();
+stats.setMode(0);
+stats.domElement.style.position = 'absolute';
+stats.domElement.style.top = '0px';
+stats.domElement.style.left = '0px';
+document.body.appendChild(stats.domElement);
 
 //renderer.setClearColor(0xAAAAAA, 1);
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -52967,13 +53060,11 @@ var bodies = [];
 // gradient map of gravitation
 
 
-var sun = new Planet({size: 50, color: 0xffffff}, scene);
+var sun = new Planet({size: 50, mass: 3000, color: 0xffffff}, scene);
 bodies.push(sun);
 
-var earth = new Planet({size: 10, color: 0xffffff, velocity: new three.Vector3(0, 0, 2)}, scene);
+var earth = new Planet({size: 10, color: 0xffffff, velocity: new three.Vector3(0, 0, 2), position: new three.Vector3(300, 0, 0)}, scene);
 bodies.push(earth);
-
-earth.mesh.position.x = 300;
 
 var plane = planeFactory();
 scene.add(plane);
@@ -52987,12 +53078,7 @@ scene.add(ambientLight);
 
 function update () {
     _.each(bodies, function (body) {
-        var forceVector = calculateAllForces(body);
-        var acceleration = forceVector.divideScalar(body.mass);
-
-        body.velocity = body.velocity.add(acceleration);
-        body.forces = forceVector;
-
+        body.force = calculateAllForces(body);;
         body.update();
     });
 }
@@ -53003,34 +53089,26 @@ function calculateAllForces (subject) {
     _.each(bodies, function (object) {
         if (subject.id === object.id) return;
 
-        forceVector.add(calculateForce(subject, object));
+        forceVector.add(physics.calculateForce(subject, object));
     });
 
-    console.log(subject.id + ': ' + forceVector.length());
-
     return forceVector;
-}
-
-function calculateForce (subject, object) {
-    var forceVector = new three.Vector3().subVectors(subject.mesh.position, object.mesh.position);
-    var length = forceVector.length();
-    var directionVector = new three.Vector3().copy(forceVector).divideScalar(forceVector.length());
-
-    return directionVector.multiplyScalar(0.005 * subject.mass * object.mass / length * length);
 }
 
 var controls = new OrbitControls(camera);
 
 function render () {
+    stats.begin();
     update();
-    requestAnimationFrame(render);
     renderer.render(scene, camera);
+    stats.end();
+    requestAnimationFrame(render);
 }
 render();
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer,arguments[3],arguments[4],arguments[5],arguments[6],"/js/app.js","/js")
 
-},{"./plane.js":1,"./planet.js":2,"_process":11,"buffer":7,"lodash":12,"three":14,"three-orbit-controls":13}]},{},[15])
+},{"./physics.js":1,"./plane.js":2,"./planet.js":3,"./vendor/stats.min.js":4,"_process":13,"buffer":9,"lodash":14,"three":16,"three-orbit-controls":15}]},{},[17])
 
 
 //# sourceMappingURL=app.js.map
