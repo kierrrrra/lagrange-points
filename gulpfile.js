@@ -1,19 +1,30 @@
 var gulp = require('gulp');
 var livereload = require('gulp-livereload');
-var browserify = require('browserify');
-var watchify = require('watchify');
 var plumber = require('gulp-plumber');
 var sass = require('gulp-sass');
-var buffer = require('vinyl-buffer');
-var source = require('vinyl-source-stream');
 var nodemon = require('gulp-nodemon');
 var sourcemaps = require('gulp-sourcemaps');
+var gulpif = require('gulp-if');
 var gutil = require('gulp-util');
+var uglify = require('gulp-uglify');
 var notify = require('gulp-notify');
+var minifyCss = require('gulp-minify-css');
+var browserify = require('browserify');
+var watchify = require('watchify');
+var buffer = require('vinyl-buffer');
+var source = require('vinyl-source-stream');
+
+
+var isProduction = !!(gutil.env.production);
+
+if (isProduction) {
+    console.warn('Building production assets');
+}
 
 var paths = {
     scripts: {
-        source: ['js/app.js']
+        source: 'js/app.js',
+        dest: 'public/js'
     },
     css: [
         'css/main.scss'
@@ -27,11 +38,15 @@ var paths = {
 var options = {
     entries: [paths.scripts.source],
     insertGlobals: true,
-    debug: true,
+    debug: isProduction,
     noparse: ['jquery', 'lodash', 'three', 'backbone', 'backbone-class']
 }
 
-var b = watchify(browserify(options));
+if (isProduction) {
+    var b = browserify(options);
+} else {
+    var b = watchify(browserify(options));
+}
 
 b.on('update', bundle);
 b.on('log', gutil.log);
@@ -39,12 +54,19 @@ b.on('log', gutil.log);
 function bundle() {
     return b.bundle()
         .on('error', gutil.log.bind(gutil, 'Browserify Error'))
+        // Prepare the output
         .pipe(source('app.js'))
+        .pipe(plumber())
         .pipe(buffer())
-        .pipe(sourcemaps.init({loadMaps: true}))
-        .pipe(sourcemaps.write('./'))
-        .pipe(gulp.dest('./public/js'))
-        .pipe(livereload())
+        // Sourcemaps
+        .pipe(gulpif(!isProduction, sourcemaps.init({loadMaps: true})))
+        .pipe(gulpif(!isProduction, sourcemaps.write('./')))
+        // Uglify
+        .pipe(gulpif(isProduction, uglify()))
+        // Write to destination
+        .pipe(gulp.dest(paths.scripts.dest))
+        // After build
+        .pipe(gulpif(!isProduction, livereload()))
         .pipe(notify('Browserify compiled'));
 }
 
@@ -57,13 +79,14 @@ gulp.task('scripts', bundle);
 gulp.task('sass', function () {
     gulp.src(paths.css)
         .pipe(plumber())
-        .pipe(sourcemaps.init())
+        .pipe(gulpif(!isProduction, sourcemaps.init()))
         .pipe(sass({
             includePaths: require('node-bourbon').includePaths
         }))
-        .pipe(sourcemaps.write())
+        .pipe(gulpif(!isProduction, sourcemaps.write()))
+        .pipe(gulpif(isProduction, minifyCss()))
         .pipe(gulp.dest('public/css'))
-        .pipe(livereload())
+        .pipe(gulpif(!isProduction, livereload()))
         .pipe(notify('SASS compiled'));
 });
 
@@ -78,7 +101,9 @@ gulp.task('server', function () {
 
 /** Watch task **/
 gulp.task('watch', function () {
-    gulp.watch(paths.css, ['sass']);
+    if (!isProduction) {
+        gulp.watch(paths.css, ['sass']);
+    }
 });
 
 
